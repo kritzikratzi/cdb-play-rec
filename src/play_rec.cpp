@@ -118,6 +118,9 @@ int play_rec(
 		out_dev_idx = 0;
 	}
 
+	printf("Using %s as playback device\n", pPlaybackDeviceInfos[out_dev_idx].name);
+	printf("Using %s as capture device\n", pPlaybackDeviceInfos[in_dev_idx].name);
+
 	
 
 	out_config = ma_device_config_init(ma_device_type_playback);
@@ -177,7 +180,7 @@ int play_rec(
 	}
 	
 	std::cout << "playback + recording complete" << std::endl;
-	std::cout << "wrote to " << out_file << std::endl; 
+	std::cout << "wrote to " << out_file << std::endl;
 	drwav_uninit(&capture_wav);
 	ma_device_uninit(&in_device);
 	ma_device_uninit(&out_device);
