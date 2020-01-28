@@ -8,11 +8,12 @@ file(GLOB SOURCES
     src/*.h
     src/*.cpp
 	dependencies/miniaudio/*.h
+	dependencies/args/args.hxx
 )
 
 
-add_subdirectory(dependencies/libsamplerate)
-add_subdirectory(dependencies/args)
 include_directories(dependencies/miniaudio)
+include_directories(dependencies/args)
+
 add_executable(play-rec ${SOURCES})
 
