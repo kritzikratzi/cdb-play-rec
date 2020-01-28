@@ -79,7 +79,6 @@ int main(int argc, char** argv)
 		
 		if(!in_file) std::cerr << "Input file (--in) is required" << std::endl;
 		if(!out_file) std::cerr << "Output file (--out) is required" << std::endl;
-		play_rec("/Users/hansi/Downloads/youtube-dl/boing.wav", "out.wav", in_idx, out_idx);
 		return 1;
 	}
 	
