@@ -1,0 +1,9 @@
+[submodule "dependencies/libsamplerate"]
+	path = dependencies/libsamplerate
+	url = https://github.com/erikd/libsamplerate
+[submodule "dependencies/miniaudio"]
+	path = dependencies/miniaudio
+	url = https://github.com/dr-soft/miniaudio.git
+[submodule "dependencies/args"]
+	path = dependencies/args
+	url = https://github.com/Taywee/args.git
