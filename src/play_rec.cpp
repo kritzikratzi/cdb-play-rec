@@ -14,6 +14,7 @@
 #include <thread>
 #include <iostream>
 #include <cstring>
+#include <vector>
 
 #ifdef _MSC_VER 
 extern "C" {
@@ -23,6 +24,7 @@ extern "C" {
 
 std::atomic<bool> done{false};
 std::atomic<bool> input_ready{false};
+std::vector<float> outbuff; 
 
 void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount)
 {
@@ -32,7 +34,17 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
 			return;
 		}
 		
-		int len = ma_decoder_read_pcm_frames(decoder, pOutput, frameCount);
+		if (outbuff.size() < frameCount) outbuff.resize(frameCount);
+
+		// play mono out...
+		size_t len = ma_decoder_read_pcm_frames(decoder, outbuff.data(), frameCount);
+		// ...and make it stereo
+		float * dest = (float*)pOutput;
+		for (int i = 0; i < frameCount; i++) {
+			dest[2 * i + 0] = outbuff[i];
+			dest[2 * i + 1] = outbuff[i];
+		}
+
 		if(len<=0){
 			done = true;
 		}
@@ -129,7 +141,7 @@ int play_rec(
 	out_config = ma_device_config_init(ma_device_type_playback);
 	out_config.playback.pDeviceID = &pPlaybackDeviceInfos[out_dev_idx].id;
 	out_config.playback.format   = ma_format_f32;
-	out_config.playback.channels = 1;
+	out_config.playback.channels = 2;
 	out_config.sampleRate        = sample_rate;
 	out_config.dataCallback      = data_callback;
 	out_config.pUserData         = &decoder;
