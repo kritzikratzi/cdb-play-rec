@@ -1,6 +1,6 @@
 
 // lists all devices, and does not much else
-void list_devices();
+int list_devices();
 
 // plays a file and captures the input
 // returns 0 on success

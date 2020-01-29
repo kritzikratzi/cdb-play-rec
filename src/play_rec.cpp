@@ -13,10 +13,13 @@
 #include <chrono>
 #include <thread>
 #include <iostream>
+#include <cstring>
 
-extern "C"{
-	#include <strings.h>
+#ifdef _MSC_VER 
+extern "C" {
+#include "util/evil_string.h"
 }
+#endif
 
 std::atomic<bool> done{false};
 std::atomic<bool> input_ready{false};
@@ -191,7 +194,7 @@ int play_rec(
 }
 
 
-void list_devices(){
+int list_devices(){
 	std::cout << "Device list: " << std::endl;
 
 	ma_result result;
@@ -227,7 +230,8 @@ void list_devices(){
 	
 	
 	ma_context_uninit(&context);
-	
+
+	return 0; 
 }
 
 int find_in_dev(const char * search_name){
