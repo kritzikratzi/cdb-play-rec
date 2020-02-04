@@ -5,8 +5,10 @@ project(play-rec)
 
 
 file(GLOB SOURCES
-    src/*.h
-    src/*.cpp
+	src/*.h
+	src/*.cpp
+	src/util/*.h
+	src/util/*.c
 	dependencies/miniaudio/*.h
 	dependencies/args/args.hxx
 )
