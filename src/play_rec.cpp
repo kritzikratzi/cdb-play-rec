@@ -13,6 +13,8 @@
 #include <chrono>
 #include <thread>
 #include <iostream>
+#include <vector>
+#include "scope_guard.h"
 
 extern "C"{
 	#include <strings.h>
@@ -20,6 +22,25 @@ extern "C"{
 
 std::atomic<bool> done{false};
 std::atomic<bool> input_ready{false};
+struct OutputData{
+	drwav* ch1;
+	drwav* ch2;
+	std::vector<int16_t> temp_buffer;
+	
+	// do the float->double conversion (we really really
+	// want to use f64 as resulting wav format),
+	// and we want to split the two channels
+	int16_t * fill_temp(float * buffer, int stride, int frameCount){
+		if(temp_buffer.size()<frameCount){
+			temp_buffer.resize(frameCount);
+		}
+		for(int i = 0; i < frameCount; i++){
+			temp_buffer[i] = buffer[i*stride]*32767;
+		}
+		return temp_buffer.data();
+	}
+};
+
 
 void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount)
 {
@@ -36,17 +57,29 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
 	}
 	if(pInput != 0){
 		input_ready = true;
-		drwav* wav = (drwav*)pDevice->pUserData;
-		drwav_write_pcm_frames(wav, frameCount, pInput);
+		OutputData * out_d = (OutputData*)pDevice->pUserData;
+		int stride = pDevice->capture.channels;
+		float * in = (float*)pInput;
+		drwav_write_pcm_frames(
+							   out_d->ch1,
+							   frameCount,
+							   out_d->fill_temp(in, stride, frameCount)
+							   );
+		drwav_write_pcm_frames(
+							   out_d->ch2,
+							   frameCount,
+							   out_d->fill_temp(in+1, stride, frameCount)
+							   );
 	}
 }
 
 
 int play_rec(
-			const char * in_file,
-			const char * out_file,
-			int in_dev_idx,
-			int out_dev_idx
+			 const char * in_file,
+			 const char * out_file_1,
+			 const char * out_file_2,
+			 uint32_t in_dev_idx,
+			 uint32_t out_dev_idx
 			  ){
 	
 	int sample_rate = 192000;
@@ -58,12 +91,8 @@ int play_rec(
 	ma_device_config in_config;
 	ma_device out_device;
 	ma_device in_device;
-	
-	if (ma_context_init(NULL, 0, NULL, &context) != MA_SUCCESS) {
-		printf("Failed to initialize context.\n");
-		return -2;
-	}
-	
+	scope_guard scope_exit;
+
 	ma_decoder_config decoder_config;
 	decoder_config.channels = 1;
 	decoder_config.format = ma_format_f32;
@@ -72,20 +101,34 @@ int play_rec(
 	if (result != MA_SUCCESS) {
 		return -2;
 	}
+	scope_exit += [&](){ ma_decoder_uninit(&decoder);};
 	
 	drwav_data_format encoder_format;
-	drwav capture_wav;
 	encoder_format.container     = drwav_container_riff;
-	encoder_format.format        = DR_WAVE_FORMAT_IEEE_FLOAT;
-	encoder_format.channels      = 2;
+	encoder_format.format        = DR_WAVE_FORMAT_PCM;
+	encoder_format.channels      = 1;
 	encoder_format.sampleRate    = sample_rate;
-	encoder_format.bitsPerSample = 32;
-	if (drwav_init_file_write(&capture_wav, out_file, &encoder_format, NULL) == DRWAV_FALSE) {
-		ma_decoder_uninit(&decoder);
-		printf("Failed to initialize output file.\n");
+	encoder_format.bitsPerSample = 16;
+	
+	drwav capture_wav_1;
+	if (drwav_init_file_write(&capture_wav_1, out_file_1, &encoder_format, NULL) == DRWAV_FALSE) {
+		printf("Failed to initialize output file (ch 1).\n");
 		return -1;
 	}
-
+	scope_exit += [&](){ drwav_uninit(&capture_wav_1); };
+	
+	drwav capture_wav_2;
+	if (drwav_init_file_write(&capture_wav_2, out_file_2, &encoder_format, NULL) == DRWAV_FALSE) {
+		printf("Failed to initialize output file (ch2).\n");
+		return -1;
+	}
+	scope_exit += [&](){ drwav_uninit(&capture_wav_2); };
+	
+	if (ma_context_init(NULL, 0, NULL, &context) != MA_SUCCESS) {
+		printf("Failed to initialize context.\n");
+		return -2;
+	}
+	scope_exit += [&](){ ma_context_uninit(&context);};
 	
 	ma_device_info* pPlaybackDeviceInfos;
 	ma_uint32 playbackDeviceCount;
@@ -99,12 +142,10 @@ int play_rec(
 	
 	if(captureDeviceCount==0){
 		printf("No capture device found\n");
-		ma_context_uninit(&context);
 		return 1;
 	}
 	if(playbackDeviceCount==0){
 		printf("No playback device found\n");
-		ma_context_uninit(&context);
 		return 1;
 	}
 	
@@ -119,7 +160,7 @@ int play_rec(
 	}
 
 	printf("Using %s as playback device\n", pPlaybackDeviceInfos[out_dev_idx].name);
-	printf("Using %s as capture device\n", pPlaybackDeviceInfos[in_dev_idx].name);
+	printf("Using %s as capture device\n", pCaptureDeviceInfos[in_dev_idx].name);
 
 	
 
@@ -132,45 +173,31 @@ int play_rec(
 	out_config.pUserData         = &decoder;
 	if (ma_device_init(NULL, &out_config, &out_device) != MA_SUCCESS) {
 		printf("Failed to open playback device.\n");
-		drwav_uninit(&capture_wav);
-		ma_decoder_uninit(&decoder);
-		ma_context_uninit(&context);
 		return -3;
 	}
-
+	scope_exit += [&](){ ma_device_uninit(&out_device);};
+	
 	in_config = ma_device_config_init(ma_device_type_capture);
 	in_config.playback.pDeviceID = &pCaptureDeviceInfos[in_dev_idx].id;
 	in_config.capture.format = ma_format_f32;
 	in_config.capture.channels = 2;
 	in_config.sampleRate        = sample_rate;
 	in_config.dataCallback      = data_callback;
-	in_config.pUserData         = &capture_wav;
+	OutputData out_user_data{&capture_wav_1, &capture_wav_2};
+	in_config.pUserData         = &out_user_data;
 	if (ma_device_init(NULL, &in_config, &in_device) != MA_SUCCESS) {
 		printf("Failed to open capture device.\n");
-		drwav_uninit(&capture_wav);
-		ma_decoder_uninit(&decoder);
-		ma_device_uninit(&in_device);
-		ma_context_uninit(&context);
 		return -3;
 	}
-
+	scope_exit += [&](){ ma_device_uninit(&in_device);};
 	
 	if (ma_device_start(&out_device) != MA_SUCCESS) {
 		printf("Failed to start playback device.\n");
-		drwav_uninit(&capture_wav);
-		ma_decoder_uninit(&decoder);
-		ma_device_uninit(&out_device);
-		ma_context_uninit(&context);
 		return -4;
 	}
 	
 	if (ma_device_start(&in_device) != MA_SUCCESS) {
 		printf("Failed to start capture device.\n");
-		drwav_uninit(&capture_wav);
-		ma_decoder_uninit(&decoder);
-		ma_device_uninit(&in_device);
-		ma_device_uninit(&out_device);
-		ma_context_uninit(&context);
 		return -4;
 	}
 	
@@ -180,18 +207,21 @@ int play_rec(
 	}
 	
 	std::cout << "playback + recording complete" << std::endl;
-	std::cout << "wrote to " << out_file << std::endl;
-	drwav_uninit(&capture_wav);
-	ma_device_uninit(&in_device);
-	ma_device_uninit(&out_device);
-	ma_decoder_uninit(&decoder);
-	ma_context_uninit(&context);
+	std::cout << "wrote ch1 to " << out_file_1 << std::endl;
+	std::cout << "wrote ch2 to " << out_file_2 << std::endl;
+
+	// this is now taken care of by the scope guard:
+	//drwav_uninit(&capture_wav);
+	//ma_device_uninit(&in_device);
+	//ma_device_uninit(&out_device);
+	//ma_decoder_uninit(&decoder);
+	//ma_context_uninit(&context);
 
 	return 0;
 }
 
 
-void list_devices(){
+int list_devices(){
 	std::cout << "Device list: " << std::endl;
 
 	ma_result result;
@@ -227,7 +257,7 @@ void list_devices(){
 	
 	
 	ma_context_uninit(&context);
-	
+	return 0;
 }
 
 int find_in_dev(const char * search_name){
